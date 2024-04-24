@@ -1,4 +1,4 @@
-import ts, { type InterfaceDeclaration, type TypeLiteralNode } from "typescript";
+import ts, { type TypeNode, type InterfaceDeclaration, type TypeLiteralNode } from "typescript";
 import { NEVER, STRING, tsModifiers, tsRecord } from "../lib/ts.js";
 import { createRef, debug } from "../lib/utils.js";
 import type { GlobalContext, OpenAPI3 } from "../types.js";
@@ -9,7 +9,7 @@ import transformWebhooksObject from "./webhooks-object.js";
 
 type SchemaTransforms = keyof Pick<OpenAPI3, "paths" | "webhooks" | "components" | "$defs">;
 
-const transformers: Record<SchemaTransforms, (node: any, options: GlobalContext) => ts.TypeNode> = {
+const transformers: Record<SchemaTransforms, (node: any, options: GlobalContext) => ts.Node> = {
   paths: transformPathsObject,
   webhooks: transformWebhooksObject,
   components: transformComponentsObject,
@@ -30,27 +30,32 @@ export default function transformSchema(schema: OpenAPI3, ctx: GlobalContext) {
     if (schema[root] && typeof schema[root] === "object") {
       const rootT = performance.now();
       const subType = transformers[root](schema[root], ctx);
-      if ((subType as ts.TypeLiteralNode).members?.length) {
-        type.push(
-          ctx.exportType
-            ? ts.factory.createTypeAliasDeclaration(
-                /* modifiers      */ tsModifiers({ export: true }),
-                /* name           */ root,
-                /* typeParameters */ undefined,
-                /* type           */ subType,
-              )
-            : ts.factory.createInterfaceDeclaration(
-                /* modifiers       */ tsModifiers({ export: true }),
-                /* name            */ root,
-                /* typeParameters  */ undefined,
-                /* heritageClauses */ undefined,
-                /* members         */ (subType as TypeLiteralNode).members,
-              ),
-        );
-        debug(`${root} done`, "ts", performance.now() - rootT);
+      if (ts.isTypeNode(subType)) {
+        if ((subType as ts.TypeLiteralNode).members?.length) {
+          type.push(
+            ctx.exportType
+              ? ts.factory.createTypeAliasDeclaration(
+                  /* modifiers      */ tsModifiers({ export: true }),
+                  /* name           */ root,
+                  /* typeParameters */ undefined,
+                  /* type           */ subType as TypeNode,
+                )
+              : ts.factory.createInterfaceDeclaration(
+                  /* modifiers       */ tsModifiers({ export: true }),
+                  /* name            */ root,
+                  /* typeParameters  */ undefined,
+                  /* heritageClauses */ undefined,
+                  /* members         */ (subType as TypeLiteralNode).members,
+                ),
+          );
+          debug(`${root} done`, "ts", performance.now() - rootT);
+        } else {
+          type.push(emptyObj);
+          debug(`${root} done (skipped)`, "ts", 0);
+        }
       } else {
-        type.push(emptyObj);
-        debug(`${root} done (skipped)`, "ts", 0);
+        type.push(subType);
+        debug(`${root} done`, "ts", 0);
       }
     } else {
       type.push(emptyObj);
